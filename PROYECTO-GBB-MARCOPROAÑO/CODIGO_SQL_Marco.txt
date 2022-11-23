@@ -1,0 +1,136 @@
+
+-------
+JUAN MARCO PROAÑO CHELE |
+-------
+
+------------------------------------------------------------------------------------------------------------------
+
+--TRIGGER
+
+--Un trigger que impida el acceso de un inmigrante más de cinco veces en el mismo mes a un inmigrante.(Podría pensarse que está traficando).
+
+create function sp_deniega_inmigrante() returns trigger 
+as 
+$$
+declare
+	meses integer;
+begin
+
+	select into meses count(extract(month from ingreso.fecha_ingreso)) from public.ingreso
+	where ingreso.id_inmigrante = new.id_inmigrante and 
+		extract(year from current_date) = extract(year from new.fecha_ingreso) and 
+		extract(month from current_date) = extract(month from new.fecha_ingreso);
+		
+	if meses > 6 then
+		raise exception 'ESTE INMIGRANTE INGRESO AL PAIS 5 VECES EN ESTE MES';	
+	end if;
+	
+	return new;
+	
+end
+$$
+language plpgsql;
+
+
+create trigger tr_max_ingresos after insert on public.ingreso
+for each row
+execute function public.sp_deniega_inmigrante();
+
+--COMPROBACIÓN TRIGGER
+insert into ingreso values(24, 1, '2022-11-23','2022-11-22', 'AVION', 'AEROPUERTO', 'CUENCA', '2022-11-24')
+
+------------------------------------------------------------------------------------------------------------------
+
+--CURSOR
+
+do 
+$$ 
+declare
+	resultado Record;	
+	cur_migrantes_menores cursor for	
+	select extract(year from fecha_ingreso) as ano,
+	count(inmigrante.profesion) as menores_que_emigraron
+	from ingreso
+	inner join inmigrante on ingreso.id_inmigrante = inmigrante.id_inmigrante
+	where inmigrante.tipo_dni = 'ACTA DE NACIMIENTO'
+	group by ano;
+begin
+	for resultado in cur_migrantes_menores loop
+		raise notice 'año: %, menores_que_migraron: %',
+			resultado.ano,
+			resultado.menores_que_emigraron;
+	end loop;
+end
+$$
+language 'plpgsql';
+	
+------------------------------------------------------------------------------------------------------------------
+
+--PROCEDIMIENTO ALMACENADO
+
+create function sp_inmigrantes_pais(pais varchar)
+returns table(id_inmigrante integer, nombre varchar, apellido varchar, fecha_nacimiento date, pasaporte varchar, pais_origen varchar, tipo_dni varchar, numero_dni varchar, sexo varchar, profesion varchar)
+as
+$$
+	select * from inmigrante where pais_origen = pais;
+$$
+language sql
+
+--select id_inmigrante, nombre, apellido, fecha_nacimiento, pasaporte, pais_origen, tipo_dni, numero_dni, sexo, profesion from sp_inmigrantes_pais('VENEZUELA')
+
+------------------------------------------------------------------------------------------------------------------
+
+--CONSULTA 1
+--HISTORICO DE INGERSOS POR PERSONA DE MAYOR A MENOR
+
+select inmigrante.nombre_inmigrante,
+	inmigrante.apellido_inmigrante,
+	inmigrante.numero_pasaporte,
+	count(ingreso.id_inmigrante) as ingresos
+from ingreso
+inner join inmigrante on ingreso.id_inmigrante = inmigrante.id_inmigrante
+group by inmigrante.nombre_inmigrante,
+	inmigrante.apellido_inmigrante,
+	inmigrante.numero_pasaporte
+order by ingresos desc
+
+------------------------------------------------------------------------------------------------------------------
+
+--CONSULTA 2
+--LISTADO DE OBJETIVOS DE ARRIBO AL PAIS MAS COMUNES
+
+select inmigrante.nombre_inmigrante, inmigrante.apellido_inmigrante, ficha_extranjero.objetivo_arribo, inmigrante.pais_origen
+from ficha_extranjero
+inner join inmigrante on ficha_extranjero.id_inmigrante = inmigrante.id_inmigrante
+order by ficha_extranjero.objetivo_arribo
+
+------------------------------------------------------------------------------------------------------------------
+
+--CONSULTA 3
+--HISTORICO DE PERSONAS QUE MIGRARON POR AÑO
+
+select extract(year from fecha_ingreso) as ano,
+	count(inmigrante.profesion) as personas_que_migraron
+	from ingreso
+	inner join inmigrante on ingreso.id_inmigrante = inmigrante.id_inmigrante
+	group by ano;
+
+------------------------------------------------------------------------------------------------------------------
+
+--CONSULTA 4
+--HISTORICO ENTRE INGRESO AL PAIS Y EL TIEMPO EN ACERCARSE AL DEPARTAMENTO DE MIGRACION
+
+select inmigrante.nombre_inmigrante, inmigrante.apellido_inmigrante, ingreso.fecha_ingreso, ficha_extranjero.fecha_tramite
+from ficha_extranjero
+inner join inmigrante on ficha_extranjero.id_inmigrante = inmigrante.id_inmigrante
+inner join ingreso on ficha_extranjero.id_inmigrante = ingreso.id_inmigrante
+
+------------------------------------------------------------------------------------------------------------------
+
+--REPORTE
+--HISTORICO DE UNIDADES DE CONTROL SEGUN EL NUMERO DE USOS
+
+select max(unidad_control) as unidad, count(unidad_control) as usos 
+from ingreso
+group by unidad_control
+order by usos desc
